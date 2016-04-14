@@ -1,4 +1,5 @@
 require 'jsonapi/formatter'
+require 'jsonapi/operation_processor'
 
 module JSONAPI
   class Configuration
@@ -14,6 +15,7 @@ module JSONAPI
                 :default_paginator,
                 :default_page_size,
                 :maximum_page_size,
+                :default_operation_processor_klass,
                 :use_text_errors,
                 :top_level_links_include_pagination,
                 :top_level_meta_include_record_count,
@@ -68,6 +70,10 @@ module JSONAPI
       # NOTE: always_include_to_many_linkage_data is not currently implemented
       self.always_include_to_one_linkage_data = false
       self.always_include_to_many_linkage_data = false
+
+      # The default Operation Processor to use if one is not defined specifically
+      # for a Resource.
+      self.default_operation_processor_klass = JSONAPI::OperationProcessor
     end
 
     def json_key_format=(format)
@@ -86,6 +92,10 @@ module JSONAPI
 
     def exception_class_whitelisted?(e)
       @exception_class_whitelist.flatten.any? { |k| e.class.ancestors.include?(k) }
+    end
+
+    def default_operation_processor_klass=(default_operation_processor_klass)
+      @default_operation_processor_klass = default_operation_processor_klass
     end
 
     attr_writer :allow_include, :allow_sort, :allow_filter
