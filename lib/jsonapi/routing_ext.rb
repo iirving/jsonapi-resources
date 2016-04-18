@@ -33,6 +33,7 @@ module ActionDispatch
           end
 
           resource @resource_type, options do
+            # :nocov:
             if @scope.respond_to? :[]=
               # Rails 4
               @scope[:jsonapi_resource] = @resource_type
@@ -52,6 +53,7 @@ module ActionDispatch
                 end
               end
             end
+            # :nocov:
           end
         end
 
@@ -99,6 +101,7 @@ module ActionDispatch
           end
 
           resources @resource_type, options do
+            # :nocov:
             if @scope.respond_to? :[]=
               # Rails 4
               @scope[:jsonapi_resource] = @resource_type
@@ -117,6 +120,7 @@ module ActionDispatch
                 end
               end
             end
+            # :nocov:
           end
         end
 
@@ -230,7 +234,7 @@ module ActionDispatch
         end
 
         protected
-
+        # :nocov:
         def jsonapi_resource_scope(resource, resource_type) #:nodoc:
           @scope = @scope.new(scope_level_resource: resource, jsonapi_resource: resource_type)
 
@@ -238,7 +242,7 @@ module ActionDispatch
         ensure
           @scope = @scope.parent
         end
-
+        # :nocov:
         private
 
         def resource_type_with_module_prefix(resource = nil)
