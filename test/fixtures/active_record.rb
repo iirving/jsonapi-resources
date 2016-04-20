@@ -1565,8 +1565,8 @@ end
 class FlatPostsController < JSONAPI::ResourceController
 end
 
-# CustomOperationProcessors
-class Api::V4::BookOperationProcessor < JSONAPI::OperationProcessor
+# CustomProcessors
+class Api::V4::BookProcessor < JSONAPI::Processor
   after_find do
     unless @results.is_a?(JSONAPI::ErrorsOperationResult)
       @result.meta[:total_records] = @result.record_count
@@ -1575,9 +1575,9 @@ class Api::V4::BookOperationProcessor < JSONAPI::OperationProcessor
   end
 end
 
-class PostOperationProcessor < JSONAPI::OperationProcessor
+class PostProcessor < JSONAPI::Processor
   def find
-    if $PostOperationProcessorRaisesErrors
+    if $PostProcessorRaisesErrors
       raise PostsController::SubSpecialError
     end
     # puts("In custom Operations Processor without Namespace")
@@ -1594,9 +1594,9 @@ end
 
 module Api
   module V7
-    class CategoryOperationProcessor < JSONAPI::OperationProcessor
+    class CategoryProcessor < JSONAPI::Processor
       def show
-        if $PostOperationProcessorRaisesErrors
+        if $PostProcessorRaisesErrors
           raise PostsController::SubSpecialError
         end
         # puts("In custom Operations Processor without Namespace")
@@ -1608,7 +1608,7 @@ end
 
 module Api
   module V1
-    class PostOperationProcessor < JSONAPI::OperationProcessor
+    class PostProcessor < JSONAPI::Processor
       def show
         # puts("In custom Operations Processor with Namespace")
         super
