@@ -15,26 +15,77 @@ class PostsControllerTest < ActionController::TestCase
     assert json_response['data'].is_a?(Array)
   end
 
+  def test_accept_header_missing
+    @request.headers['Accept'] = nil
+
+    get :index
+    assert_response :success
+  end
+
+  def test_accept_header_jsonapi_mixed
+    @request.headers['Accept'] =
+      "#{JSONAPI::MEDIA_TYPE},#{JSONAPI::MEDIA_TYPE};charset=test"
+
+    get :index
+    assert_response :success
+  end
+
+  def test_accept_header_jsonapi_modified
+    @request.headers['Accept'] = "#{JSONAPI::MEDIA_TYPE};charset=test"
+
+    get :index
+    assert_response 406
+    assert_equal 'Not acceptable', json_response['errors'][0]['title']
+    assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
+  end
+
+  def test_accept_header_jsonapi_multiple_modified
+    @request.headers['Accept'] =
+      "#{JSONAPI::MEDIA_TYPE};charset=test,#{JSONAPI::MEDIA_TYPE};charset=test"
+
+    get :index
+    assert_response 406
+    assert_equal 'Not acceptable', json_response['errors'][0]['title']
+    assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
+  end
+
+  def test_accept_header_all
+    @request.headers['Accept'] = "*/*"
+
+    get :index
+    assert_response :success
+  end
+
+  def test_accept_header_not_jsonapi
+    @request.headers['Accept'] = 'text/plain'
+
+    get :index
+    assert_response 406
+    assert_equal 'Not acceptable', json_response['errors'][0]['title']
+    assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
+  end
+
   def test_exception_class_whitelist
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :error_raising
-    # test that the operations processor rescues the error when it
+    $PostProcessorRaisesErrors = true
+    # test that the operations dispatcher rescues the error when it
     # has not been added to the exception_class_whitelist
     get :index
     assert_response 500
-    # test that the operations processor does not rescue the error when it
+    # test that the operations dispatcher does not rescue the error when it
     # has been added to the exception_class_whitelist
     JSONAPI.configuration.exception_class_whitelist << PostsController::SpecialError
     get :index
     assert_response 403
   ensure
+    $PostProcessorRaisesErrors = false
     JSONAPI.configuration = original_config
   end
 
   def test_on_server_error_block_callback_with_exception
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :error_raising
     JSONAPI.configuration.exception_class_whitelist = []
+    $PostProcessorRaisesErrors = true
 
     @controller.class.instance_variable_set(:@callback_message, "none")
     BaseController.on_server_error do
@@ -48,13 +99,14 @@ class PostsControllerTest < ActionController::TestCase
     assert_equal "Internal Server Error", json_response['errors'][0]['title']
     assert_equal "Internal Server Error", json_response['errors'][0]['detail']
   ensure
+    $PostProcessorRaisesErrors = false
     JSONAPI.configuration = original_config
   end
 
   def test_on_server_error_method_callback_with_exception
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :error_raising
     JSONAPI.configuration.exception_class_whitelist = []
+    $PostProcessorRaisesErrors = true
 
     #ignores methods that don't exist
     @controller.class.on_server_error :set_callback_message, :a_bogus_method
@@ -66,6 +118,7 @@ class PostsControllerTest < ActionController::TestCase
     # test that it renders the default server error response
     assert_equal "Internal Server Error", json_response['errors'][0]['title']
   ensure
+    $PostProcessorRaisesErrors = false
     JSONAPI.configuration = original_config
   end
 
@@ -80,6 +133,8 @@ class PostsControllerTest < ActionController::TestCase
 
     # test that it does not render error
     assert json_response.key?('data')
+  ensure
+    $PostProcessorRaisesErrors = false
   end
 
   def test_index_filter_with_empty_result
@@ -319,7 +374,7 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_desc_sorting_by_relationship_field
     post  = create_alphabetically_first_user_and_post
-    get :index, {sort: '-author.name'}
+    get :index, params: {sort: '-author.name'}
 
     assert_response :success
     assert json_response['data'].length > 10, 'there are enough records to show sort'
@@ -365,6 +420,15 @@ class PostsControllerTest < ActionController::TestCase
     assert_equal json_response['meta'], nil
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
+  end
+
+  def test_show_does_not_include_pages_count_in_meta
+    JSONAPI.configuration.top_level_meta_include_page_count = true
+    get :show, params: { id: Post.first.id }
+    assert_response :success
+    assert_equal json_response['meta'], nil
+  ensure
+    JSONAPI.configuration.top_level_meta_include_page_count = false
   end
 
   def test_show_single_with_includes
@@ -447,6 +511,28 @@ class PostsControllerTest < ActionController::TestCase
     assert_equal json_response['data']['links']['self'], response.location
   end
 
+  def test_create_simple_id_not_allowed
+    set_content_type_header!
+    post :create, params:
+      {
+        data: {
+          type: 'posts',
+          id: 'asdfg',
+          attributes: {
+            title: 'JR is Great',
+            body: 'JSONAPIResources is the greatest thing since unsliced bread.'
+          },
+          relationships: {
+            author: {data: {type: 'people', id: '3'}}
+          }
+        }
+      }
+
+    assert_response :bad_request
+    assert_match /id is not allowed/, response.body
+    assert_equal nil,response.location
+  end
+
   def test_create_link_to_missing_object
     set_content_type_header!
     post :create, params:
@@ -499,6 +585,7 @@ class PostsControllerTest < ActionController::TestCase
       {
         data: {
           type: 'posts',
+          id: 'my_id',
           attributes: {
             asdfg: 'aaaa',
             title: 'JR is Great',
@@ -517,10 +604,13 @@ class PostsControllerTest < ActionController::TestCase
     assert_equal 'JR is Great', json_response['data']['attributes']['title']
     assert_equal 'JSONAPIResources is the greatest thing since unsliced bread.', json_response['data']['attributes']['body']
 
-    assert_equal 1, json_response['meta']["warnings"].count
+    assert_equal 2, json_response['meta']["warnings"].count
     assert_equal "Param not allowed", json_response['meta']["warnings"][0]["title"]
-    assert_equal "asdfg is not allowed.", json_response['meta']["warnings"][0]["detail"]
+    assert_equal "id is not allowed.", json_response['meta']["warnings"][0]["detail"]
     assert_equal '105', json_response['meta']["warnings"][0]["code"]
+    assert_equal "Param not allowed", json_response['meta']["warnings"][1]["title"]
+    assert_equal "asdfg is not allowed.", json_response['meta']["warnings"][1]["detail"]
+    assert_equal '105', json_response['meta']["warnings"][1]["code"]
     assert_equal json_response['data']['links']['self'], response.location
   ensure
     JSONAPI.configuration.raise_if_parameters_not_allowed = true
@@ -2678,6 +2768,18 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
   end
 
+  def test_books_page_count_in_meta
+    Api::V2::BookResource.paginator :paged
+    JSONAPI.configuration.top_level_meta_include_page_count = true
+    get :index, params: {include: 'book-comments'}
+    JSONAPI.configuration.top_level_meta_include_page_count = false
+
+    assert_response :success
+    assert_equal 91, json_response['meta']['page-count']
+    assert_equal 10, json_response['data'].size
+    assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
+  end
+
   def test_books_record_count_in_meta_custom_name
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
@@ -2689,6 +2791,21 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
 
     assert_response :success
     assert_equal 901, json_response['meta']['total-records']
+    assert_equal 10, json_response['data'].size
+    assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
+  end
+
+  def test_books_page_count_in_meta_custom_name
+    Api::V2::BookResource.paginator :paged
+    JSONAPI.configuration.top_level_meta_include_page_count = true
+    JSONAPI.configuration.top_level_meta_page_count_key = 'total_pages'
+
+    get :index, params: {include: 'book-comments'}
+    JSONAPI.configuration.top_level_meta_include_page_count = false
+    JSONAPI.configuration.top_level_meta_page_count_key = :page_count
+
+    assert_response :success
+    assert_equal 91, json_response['meta']['total-pages']
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
   end
@@ -3082,7 +3199,6 @@ class Api::V4::BooksControllerTest < ActionController::TestCase
 
   def test_books_offset_pagination_meta
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :counting_active_record
     Api::V4::BookResource.paginator :offset
     get :index, params: {page: {offset: 50, limit: 12}}
     assert_response :success
@@ -3095,7 +3211,6 @@ class Api::V4::BooksControllerTest < ActionController::TestCase
 
   def test_books_operation_links
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :counting_active_record
     Api::V4::BookResource.paginator :offset
     get :index, params: {page: {offset: 50, limit: 12}}
     assert_response :success
@@ -3338,7 +3453,6 @@ class Api::V7::CategoriesControllerTest < ActionController::TestCase
 
   def test_not_whitelisted_error_in_controller
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :error_raising
     JSONAPI.configuration.exception_class_whitelist = []
     get :show, params: {id: '1'}
     assert_response 500
@@ -3349,12 +3463,13 @@ class Api::V7::CategoriesControllerTest < ActionController::TestCase
 
   def test_whitelisted_error_in_controller
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.operations_processor = :error_raising
+    $PostProcessorRaisesErrors = true
     JSONAPI.configuration.exception_class_whitelist = [PostsController::SubSpecialError]
     assert_raises PostsController::SubSpecialError do
       get :show, params: {id: '1'}
     end
   ensure
     JSONAPI.configuration = original_config
+    $PostProcessorRaisesErrors = false
   end
 end

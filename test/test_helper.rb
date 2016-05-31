@@ -5,7 +5,7 @@ require 'simplecov'
 
 # To test on a specific rails version use this:
 # export RAILS_VERSION=4.2.6; bundle update rails; bundle exec rake test
-# export RAILS_VERSION=5.0.0.beta3; bundle update rails; bundle exec rake test
+# export RAILS_VERSION=5.0.0.rc1; bundle update rails; bundle exec rake test
 
 # We are no longer having Travis test Rails 4.0.x., but you can try it with:
 # export RAILS_VERSION=4.0.0; bundle update rails; bundle exec rake test
@@ -374,6 +374,12 @@ TestApp.routes.draw do
     end
   end
 
+  namespace :dasherized_namespace, path: 'dasherized-namespace' do
+    namespace :v1 do
+      jsonapi_resources :people
+    end
+  end
+
   namespace :pets do
     namespace :v1 do
       jsonapi_resources :cats
@@ -391,6 +397,12 @@ MyEngine::Engine.routes.draw do
   end
 
   namespace :admin_api do
+    namespace :v1 do
+      jsonapi_resources :people
+    end
+  end
+
+  namespace :dasherized_namespace, path: 'dasherized-namespace' do
     namespace :v1 do
       jsonapi_resources :people
     end
@@ -425,6 +437,25 @@ end
 class ActionDispatch::IntegrationTest
   self.fixture_path = "#{Rails.root}/fixtures"
   fixtures :all
+
+  def assert_jsonapi_response(expected_status)
+    assert_equal JSONAPI::MEDIA_TYPE, response.content_type
+    assert_equal expected_status, status
+  end
+end
+
+class IntegrationBenchmark < ActionDispatch::IntegrationTest
+  def self.runnable_methods
+    methods_matching(/^bench_/)
+  end
+
+  def self.run_one_method(klass, method_name, reporter)
+    Benchmark.bm(method_name.length) do |job|
+      job.report(method_name) do
+        super(klass, method_name, reporter)
+      end
+    end
+  end
 end
 
 class UpperCamelizedKeyFormatter < JSONAPI::KeyFormatter

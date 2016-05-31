@@ -210,6 +210,9 @@ module JSONAPI
         fail JSONAPI::Exceptions::ValidationErrors.new(self)
       end
       :completed
+
+    rescue ActiveRecord::DeleteRestrictionError => e
+      fail JSONAPI::Exceptions::RecordLocked.new(e.message)
     end
 
     def _create_to_many_links(relationship_type, relationship_key_values)
@@ -265,6 +268,11 @@ module JSONAPI
       @model.public_send(relation_name).delete(key)
 
       :completed
+
+    rescue ActiveRecord::DeleteRestrictionError => e
+      fail JSONAPI::Exceptions::RecordLocked.new(e.message)
+    rescue ActiveRecord::RecordNotFound
+      fail JSONAPI::Exceptions::RecordNotFound.new(key)
     end
 
     def _remove_to_one_link(relationship_type)
@@ -620,8 +628,13 @@ module JSONAPI
         apply_sort(records, order_options, context)
       end
 
+      # Assumes ActiveRecord's counting. Override if you need a different counting method
+      def count_records(records)
+        records.count(:all)
+      end
+
       def find_count(filters, options = {})
-        filter_records(filters, options).count(:all)
+        count_records(filter_records(filters, options))
       end
 
       # Override this method if you have more complex requirements than this basic find method provides
@@ -636,9 +649,15 @@ module JSONAPI
 
         records = apply_pagination(records, options[:paginator], order_options)
 
+        resources_for(records, context)
+      end
+
+      def resources_for(records, context)
         resources = []
+        resource_classes = {}
         records.each do |model|
-          resources.push self.resource_for_model(model).new(model, context)
+          resource_class = resource_classes[model.class] ||= self.resource_for_model(model)
+          resources.push resource_class.new(model, context)
         end
 
         resources
@@ -701,7 +720,7 @@ module JSONAPI
       end
 
       def resource_key_type
-        @_resource_key_type || JSONAPI.configuration.resource_key_type
+        @_resource_key_type ||= JSONAPI.configuration.resource_key_type
       end
 
       def verify_key(key, context = nil)
